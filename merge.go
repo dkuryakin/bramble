@@ -116,6 +116,25 @@ func buildBoundaryFieldsMap(services ...*Service) BoundaryFieldsMap {
 	return result
 }
 
+func enumsEqual(a, b *ast.Definition) bool {
+	if a.Kind != ast.Enum || b.Kind != ast.Enum {
+		return false
+	}
+	if len(a.EnumValues) != len(b.EnumValues) {
+		return false
+	}
+	aValues := make(map[string]bool)
+	for _, v := range a.EnumValues {
+		aValues[v.Name] = true
+	}
+	for _, v := range b.EnumValues {
+		if !aValues[v.Name] {
+			return false
+		}
+	}
+	return true
+}
+
 func mergeTypes(a, b map[string]*ast.Definition) (map[string]*ast.Definition, error) {
 	result := make(map[string]*ast.Definition)
 	for k, v := range a {
@@ -161,6 +180,9 @@ func mergeTypes(a, b map[string]*ast.Definition) (map[string]*ast.Definition, er
 			if k != queryObjectName && k != mutationObjectName {
 				if newVB.Kind == ast.Interface {
 					return nil, fmt.Errorf("conflicting interface: %s (interfaces may not span multiple services)", k)
+				}
+				if va.Kind == ast.Enum && newVB.Kind == ast.Enum && enumsEqual(va, &newVB) {
+					continue
 				}
 				return nil, fmt.Errorf("conflicting non boundary type: %s", k)
 			}
