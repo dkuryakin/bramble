@@ -183,25 +183,32 @@ func mergeTypes(a, b map[string]*ast.Definition) (map[string]*ast.Definition, er
 			return nil, fmt.Errorf("conflicting common directive: %s(%v) conflicts with %s(%v)", va.Name, hasCommonDirectiveA, newVB.Name, hasCommonDirectiveB)
 		}
 
+		if va.Kind == ast.Enum && newVB.Kind == ast.Enum && (enumsEqual(va, &newVB) || hasCommonDirectiveA || hasCommonDirectiveB) {
+			if hasCommonDirectiveA || hasCommonDirectiveB {
+				mergedEnum, err := mergeEnums(va, &newVB)
+				if err != nil {
+					return nil, err
+				}
+				result[k] = mergedEnum
+			}
+			continue
+		}
+
+		if hasCommonDirectiveA || hasCommonDirectiveB {
+			if va.Kind == ast.Object && newVB.Kind == ast.Object {
+				mergedObj, err := mergeCommonObjects(va, &newVB)
+				if err != nil {
+					return nil, err
+				}
+				result[k] = mergedObj
+				continue
+			}
+		}
+
 		if !hasFederationDirectives(&newVB) || !hasFederationDirectives(va) {
 			if k != queryObjectName && k != mutationObjectName {
 				if newVB.Kind == ast.Interface {
 					return nil, fmt.Errorf("conflicting interface: %s (interfaces may not span multiple services)", k)
-				}
-
-				if va.Kind == ast.Enum && newVB.Kind == ast.Enum && (enumsEqual(va, &newVB) || hasCommonDirectiveA || hasCommonDirectiveB) {
-					if hasCommonDirectiveA || hasCommonDirectiveB {
-						mergedEnum, err := mergeEnums(va, &newVB)
-						if err != nil {
-							return nil, err
-						}
-						result[k] = mergedEnum
-					}
-					continue
-				}
-
-				if (hasCommonDirectiveA || hasCommonDirectiveB) && newVB.Kind == ast.Object && va.Kind == ast.Object {
-					continue
 				}
 				return nil, fmt.Errorf("conflicting non boundary type: %s", k)
 			}
@@ -523,4 +530,28 @@ func filterBuiltinFields(fields ast.FieldList) ast.FieldList {
 		res = append(res, f)
 	}
 	return res
+}
+
+func mergeCommonObjects(a, b *ast.Definition) (*ast.Definition, error) {
+	if a.Kind != ast.Object || b.Kind != ast.Object {
+		return nil, fmt.Errorf("both types must be objects")
+	}
+
+	merged := *a
+	merged.Fields = make(ast.FieldList, 0, len(a.Fields)+len(b.Fields))
+	merged.Directives = a.Directives.ForNames(commonDirectiveName)
+
+	fieldMap := make(map[string]bool, len(a.Fields))
+	merged.Fields = append(merged.Fields, a.Fields...)
+	for _, f := range a.Fields {
+		fieldMap[f.Name] = true
+	}
+
+	for _, f := range b.Fields {
+		if !fieldMap[f.Name] {
+			merged.Fields = append(merged.Fields, f)
+		}
+	}
+
+	return &merged, nil
 }
