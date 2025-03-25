@@ -176,12 +176,31 @@ func mergeTypes(a, b map[string]*ast.Definition) (map[string]*ast.Definition, er
 			continue
 		}
 
+		hasCommonDirectiveA := hasCommonDirective(va)
+		hasCommonDirectiveB := hasCommonDirective(&newVB)
+
+		if hasCommonDirectiveA != hasCommonDirectiveB {
+			return nil, fmt.Errorf("conflicting common directive: %s(%v) conflicts with %s(%v)", va.Name, hasCommonDirectiveA, newVB.Name, hasCommonDirectiveB)
+		}
+
 		if !hasFederationDirectives(&newVB) || !hasFederationDirectives(va) {
 			if k != queryObjectName && k != mutationObjectName {
 				if newVB.Kind == ast.Interface {
 					return nil, fmt.Errorf("conflicting interface: %s (interfaces may not span multiple services)", k)
 				}
-				if va.Kind == ast.Enum && newVB.Kind == ast.Enum && enumsEqual(va, &newVB) {
+
+				if va.Kind == ast.Enum && newVB.Kind == ast.Enum && (enumsEqual(va, &newVB) || hasCommonDirectiveA || hasCommonDirectiveB) {
+					if hasCommonDirectiveA || hasCommonDirectiveB {
+						mergedEnum, err := mergeEnums(va, &newVB)
+						if err != nil {
+							return nil, err
+						}
+						result[k] = mergedEnum
+					}
+					continue
+				}
+
+				if (hasCommonDirectiveA || hasCommonDirectiveB) && newVB.Kind == ast.Object && va.Kind == ast.Object {
 					continue
 				}
 				return nil, fmt.Errorf("conflicting non boundary type: %s", k)
@@ -225,6 +244,30 @@ func mergeTypes(a, b map[string]*ast.Definition) (map[string]*ast.Definition, er
 	}
 
 	return result, nil
+}
+
+func mergeEnums(a, b *ast.Definition) (*ast.Definition, error) {
+	if a.Kind != ast.Enum || b.Kind != ast.Enum {
+		return nil, fmt.Errorf("both types must be enums")
+	}
+
+	merged := *a
+	merged.EnumValues = make(ast.EnumValueList, 0)
+
+	seen := make(map[string]bool)
+
+	for _, v := range a.EnumValues {
+		merged.EnumValues = append(merged.EnumValues, v)
+		seen[v.Name] = true
+	}
+
+	for _, v := range b.EnumValues {
+		if !seen[v.Name] {
+			merged.EnumValues = append(merged.EnumValues, v)
+		}
+	}
+
+	return &merged, nil
 }
 
 func mergeImplements(sources []*ast.Schema) map[string][]*ast.Definition {
@@ -406,7 +449,7 @@ func cleanFields(fields ast.FieldList) ast.FieldList {
 
 func allowedDirective(name string) bool {
 	switch name {
-	case boundaryDirectiveName, namespaceDirectiveName, "skip", "include", "deprecated":
+	case boundaryDirectiveName, commonDirectiveName, namespaceDirectiveName, "skip", "include", "deprecated":
 		return true
 	default:
 		return false
@@ -465,6 +508,10 @@ func hasFederationDirectives(o *ast.Definition) bool {
 
 func hasBoundaryDirective(f *ast.FieldDefinition) bool {
 	return f.Directives.ForName(boundaryDirectiveName) != nil
+}
+
+func hasCommonDirective(t *ast.Definition) bool {
+	return t.Directives.ForName(commonDirectiveName) != nil
 }
 
 func filterBuiltinFields(fields ast.FieldList) ast.FieldList {

@@ -14,6 +14,7 @@ const (
 	serviceObjectName      = "Service"
 	serviceRootFieldName   = "service"
 	boundaryDirectiveName  = "boundary"
+	commonDirectiveName    = "common"
 	namespaceDirectiveName = "namespace"
 
 	queryObjectName        = "Query"
